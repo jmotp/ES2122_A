@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">Quick Eject Module Controller</string>
+
+    <string-array name="mode_types">
+        <item>Choose mode</item>
+        <item>Timer Mode</item>
+        <item>Depth Mode</item>
+        <item>Battery Mode</item>
+    </string-array>
+</resources>

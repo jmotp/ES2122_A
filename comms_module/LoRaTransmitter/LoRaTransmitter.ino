@@ -29,7 +29,6 @@ TinyGPSPlus gps;
 int n = 1;
 String str;
 char gps_lat[15], gps_lng[15];
-float last_lat, last_lng;
 
 HardwareSerial gps_serial(1);
 
@@ -70,8 +69,7 @@ void SaveCoordinates() {
 void loop() {
   while (gps_serial.available() > 0) {
     if (gps.encode(gps_serial.read())) {
-      if (gps.location.isValid() && ((float)last_lat != (float)gps.location.lat() || (float)last_lng != (float)gps.location.lng())) {
-        // Este IF ainda vai ser mudado. Neste momento envia a localização quando ela é diferente, mas vai ser em função de um timer i.e. de 10 em 10 min
+      if (gps.location.isValid()) {
         SaveCoordinates();
         str = "Packet #" + (String)n + ":;" + "Lat:" + (String)gps_lat + ";Lng:" + (String)gps_lng + ";";
         // send packet
@@ -79,9 +77,6 @@ void loop() {
           LoRa.print(str);
           LoRa.endPacket();
           n++;
-          last_lat = gps.location.lat();
-          last_lng = gps.location.lng();
-          
         #ifdef DEBUG
           Serial.println("Sent: " + str);
         #endif
@@ -89,10 +84,10 @@ void loop() {
       }
       else {
         #ifdef DEBUG
-          Serial.println("nothing");
+          Serial.println("No location available");
         #endif
       }
+      delay(30000); // try to send coordinates every 30 seconds
     }
   }
-  delay(1000);
 }

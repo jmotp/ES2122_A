@@ -1,6 +1,9 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <ESP32Servo.h>
+#include <EEPROM.h>
+
+#define EEPROM_SIZE      1
 
 #define NO_MODE           0
 #define TIMER_MODE        1
@@ -10,11 +13,13 @@
 
 #define SSID    "Quick Eject Module"
 #define PASS    "equipa#A"
-#define SERVO_PIN  13
+#define SERVO_PIN  12
 #define MIN_BATTERY 10
 #define CLOCKWISE_ROTATION 180
 #define COUNTER_CLOCKWISE_ROTATION 0
 #define ALMOST_STOPPED 100
+
+#define DEBUG
 
 
 // Setup WebServer ESP32
@@ -25,15 +30,15 @@ int opMode1 = NO_MODE;
 int opMode2 = NO_MODE;
 String operation = "";
 boolean onMission = false;
+int bootCount = 0;
 
+int convert_to_microseconds = 1000000;
 long int timerValue = 0;
-long int timeLeft = 0;
-
-
 long int depthRef = 0;
-long int depth = 0;
-
 long int batteryLevel = 100;
+
+long int timeLeft = 0;
+long int depth = 0;
 
 
 //timer variables
@@ -48,6 +53,7 @@ void IRAM_ATTR onTime() {
   interrupts++;
   portEXIT_CRITICAL_ISR(&timerMux);
 }
+
 
 void setupTimer(){
   // Configure Prescaler to 80, as our timer runs @ 80Mhz
@@ -66,17 +72,10 @@ void setupWifi(){
   WiFi.softAP(SSID, PASS, 1, 0, 1);
 
   IPAddress IP = WiFi.softAPIP();
-  Serial.print("AP IP address: ");
-  Serial.println(IP);
-}
-
-void setupWebServer(){
-  Serial.print("Start Server setup");
-  server.on("/get", HTTP_GET, handleGet);
-  server.on("/info", sendModuleInfo);
-  server.on("/start", startMission);
-  server.begin();
-  Serial.println("... started");
+  #ifdef DEBUG
+    Serial.print("AP IP address: ");
+    Serial.println(IP);
+  #endif
 }
 
 void handleGet(){
@@ -87,14 +86,18 @@ void handleGet(){
   if (server.hasArg("mode1")) {
     op = server.arg("mode1");
     opMode1 = op.toInt();
-    Serial.println("Mode1: " + op);
     data = "{\"status\":\"successful\"}";
     if (server.hasArg("op")) {
       operation = server.arg("op");
-      Serial.println("Operation: " + operation);
+      #ifdef DEBUG
+        Serial.print("Mode1: " + op + " Operation: " + operation);
+      #endif
     }
     else{
       operation = "";
+      #ifdef DEBUG
+        Serial.print("Mode1: " + op);
+      #endif
     }
   }
   else{
@@ -106,18 +109,26 @@ void handleGet(){
   if (server.hasArg("mode2")) {
     op = server.arg("mode2");
     opMode2 = op.toInt();
-    Serial.println("Mode2: " + op);
+    #ifdef DEBUG
+      Serial.println("Mode2: " + op);
+    #endif
     data = "{\"status\":\"successful\"}";
   }
   else{
     opMode2 = NO_MODE;
+    #ifdef DEBUG
+      Serial.println("");
+    #endif
+    
   }
 
   // Update the timerValue
   if(server.hasArg("timer")){
     String timer = server.arg("timer");
     timerValue = timer.toInt();
-    Serial.println("Timer Value: " + timerValue);
+    #ifdef DEBUG
+      Serial.println("Timer Value: " + timerValue); 
+    #endif
   } 
   else{
     timerValue = 0;
@@ -127,7 +138,9 @@ void handleGet(){
   if(server.hasArg("depth")){
     String depthS = server.arg("depth");
     depthRef = depthS.toInt();
-    Serial.println("Depth Reference: " + String(depthRef));
+    #ifdef DEBUG
+      Serial.println("Depth Reference: " + String(depthRef));
+    #endif
   } 
   else{
     depthRef = 0;
@@ -148,23 +161,40 @@ void sendModuleInfo(){
   }
 
   String data = "{\"status\":"+String(opMode1)+"-"+
-                String(operat)+"-"+String(opMode2)+
-                "-"+String(timerValue)+"}";
+                String(operation)+"-"+String(opMode2)+
+                "-"+String(timerValue)+"-"+String(depthRef)+"}";
 
-  Serial.println("data sent: " + data);
+  #ifdef DEBUG
+    Serial.println("data sent: " + data);
+  #endif
   server.send(200, "application/json", data);
 }
 
 void startMission(){
   
   String data = "{\"status\":\"successful\"}";
-  Serial.println("Starting Mission");
-  if(opMode1 == TIMER_MODE || opMode2 == TIMER_MODE){
-    seconds = 0;
-    Serial.println("Starting Timer");
+  #ifdef DEBUG
+    Serial.println("Starting Mission");
+  #endif
+  // in case of not being needed to check the depth
+  if((opMode1 == TIMER_MODE && opMode2 == TIMER_MODE) || (opMode1 == NO_MODE && opMode2 == TIMER_MODE) || (opMode1 == TIMER_MODE && opMode2 == NO_MODE)){
+    #ifdef DEBUG
+      Serial.println("Hibernating");
+    #endif
+    
+    server.send(200, "application/json", data);
+    hibernate();
   }
-  onMission = true;
-  server.send(200, "application/json", data);
+  else{
+  // in case there is the need to check sensors
+    if(opMode1 == TIMER_MODE || opMode2 == TIMER_MODE){
+      seconds = 0;
+      #ifdef DEBUG
+        Serial.println("Starting Timer");
+      #endif
+    }
+    onMission = true;
+  }
 }
 
 boolean getOpModeStatus(int operatMode){
@@ -192,8 +222,11 @@ void checkTime(){
   // Start Timer for the Mission and Enter Loop
   // to be replaced with interrupt
   timeLeft = timerValue - seconds;
+  
   Serial.print("Seconds left: ");
-  Serial.println(timeLeft);
+  #ifdef DEBUG
+    Serial.println(timeLeft);
+  #endif
 }
 
 void openValve(){
@@ -201,8 +234,10 @@ void openValve(){
   onMission = false;
   valveMotor.attach(SERVO_PIN);
   valveMotor.write(COUNTER_CLOCKWISE_ROTATION);
-  digitalWrite(33, HIGH);
-  Serial.println("EJECT!!!");
+  //digitalWrite(33, HIGH);
+  #ifdef DEBUG
+    Serial.println("EJECT!!!");
+  #endif
   delay(1500);  
   valveMotor.detach();
   delay(10000);
@@ -246,9 +281,47 @@ void setupServo(){
   //valveMotor.attach(SERVO_PIN);
 }
 
+
+void setupWebServer(){
+  #ifdef DEBUG
+    Serial.print("Start Server setup");
+  #endif
+  server.on("/get", HTTP_GET, handleGet);
+  server.on("/info", sendModuleInfo);
+  server.on("/start", startMission);
+  server.begin();
+  #ifdef DEBUG
+    Serial.println("... started");
+  #endif
+}
+
+void hibernate(){
+  EEPROM.write(0, 1);
+  EEPROM.commit();
+  esp_sleep_enable_timer_wakeup(timerValue * convert_to_microseconds);
+  esp_sleep_pd_config(ESP_PD_DOMAIN_MAX, ESP_PD_OPTION_OFF);
+  esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_OFF);
+  esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_SLOW_MEM, ESP_PD_OPTION_OFF);
+  esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_FAST_MEM, ESP_PD_OPTION_OFF);
+  esp_deep_sleep_start();
+}
+
 void setup() {
-  // Configure Serial Port
-  Serial.begin(115200);
+  EEPROM.begin(EEPROM_SIZE);
+  bootCount = EEPROM.read(0);
+
+
+  #ifdef DEBUG
+      Serial.begin(9600);
+      delay(1000);
+  #endif
+  if (bootCount == 1){ 
+    EEPROM.write(0, 0);
+    EEPROM.commit(); 
+    setupServo();
+    openValve();
+    bootCount = 0;
+  }
 
   // Setup WiFi
   setupWifi();
@@ -260,29 +333,24 @@ void setup() {
 
   // setup timer interrupt
   setupTimer();
-
-  // Setup Servo
-  setupServo();
-
-  //LED for testing
-  pinMode(33, OUTPUT);
-
-  Serial.println("Setup Done");  
-  Serial.println("Mode1: " + String(opMode1) + "\t   Operator: " + operation + "\t   Mode2: " + String(opMode2) + "\t   timerValue: " + String(timerValue));
-
+  delay(500);
+  
+  #ifdef DEBUG
+    Serial.println("Setup Done");  
+    Serial.println("Mode1: " + String(opMode1) + "\t   Operator: " + operation + "\t   Mode2: " + String(opMode2) + "\t   timerValue: " + String(timerValue));
+  #endif
 }
 
+
 void loop() {
-  if (interrupts > 0) {
+  if ((onMission) && (interrupts > 0)) {
     portENTER_CRITICAL(&timerMux);
     interrupts--;
     portEXIT_CRITICAL(&timerMux);
     seconds++;
     //Serial.println(String(seconds));
-    if(onMission){
-      checkForDeployment();
-      checkTime();
-    }
+    checkForDeployment();
+    checkTime();
   }
   else{
     server.handleClient();
